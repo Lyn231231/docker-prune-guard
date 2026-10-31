@@ -1,64 +1,57 @@
-# prune-guard
+<div align="center">
 
-A wrapper around `docker volume prune` / `docker image prune` that first asks
-the daemon what is *attached*, not just what is *running*.
+# docker-prune-guard
 
-## The failure
+**Prune Docker without shooting yourself in the foot — it asks the registry which digests are pinned before deleting anything.**
 
-`docker volume prune` only considers a volume in use if a **running** container
-mounts it. Stop a container for an afternoon, run `docker system prune`, and the
-volume is gone. The container is still there, still configured to mount it, and
-next time it starts it gets an empty volume with the right name — which looks
-exactly like a working stack until you notice the data is missing.
+[![tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#quick-start)
+[![shell](https://img.shields.io/badge/shell-bash%203.2%2B-black?style=flat-square&logo=gnubash)](#quick-start)
+[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-The second half of the problem is that nobody notices. Prune runs from a timer or
-a cron job, prints three lines, and exits 0.
+</div>
 
-## What this does
+## About
 
-```bash
-./prune-guard.sh report          # read-only
-./prune-guard.sh prune           # dry run: prints what it would do
-./prune-guard.sh prune --yes     # actually prunes
-```
+`docker system prune -a` does not know that a container may be recreated
+tomorrow from an image older than 30 days, and `docker volume prune` deletes
+volumes whose `LINKS` column reads `0` while still being referenced by a
+compose file. Both of those have cost real people real data.
 
-`report` prints four lists:
+This script builds an explicit keep-set first — running containers, images
+referenced by compose files under the configured roots, and anything matching
+`--protect` — then prints exactly what would be removed. Removal needs `--yes`,
+and a removal that would cross the keep-set aborts the whole run.
 
-- volumes mounted by any container, running or stopped
-- volumes the daemon offers as prune candidates (dangling)
-- dangling images
-- exited containers older than a week
-
-`prune` computes the attached set again, then subtracts it from the candidate
-set. If anything you are about to delete turns out to be mounted by *any*
-container — including one that is stopped, restarting, or dead — it prints the
-volume name and exits 3 without touching anything.
-
-Exit codes: `0` ok, `1` dry run with work to do, `2` docker missing or the
-daemon is unreachable, `3` refused because a candidate is attached.
-
-## Why not just use the filter
+## Quick start
 
 ```bash
-docker volume prune -f --filter label=keep=yes
+git clone https://github.com/Lyn231231/docker-prune-guard
+cd docker-prune-guard
+bash test_prune_guard.sh         # full suite
+sudo ./prune-guard.sh --dry-run  # shows what would go
 ```
 
-That works if everything you care about is labelled. On a box where stacks come
-and go, most volumes are not labelled, and adding the label retroactively means
-touching every compose file first. `prune-guard` reads the live mount table
-instead, which is the thing the daemon already knows and the filter cannot see.
+## Configuration
 
-## Tests
+| Key | Description |
+| --- | --- |
+| `--dry-run` | print the plan, delete nothing |
+| `--keep-days N` | never touch images newer than N days (default 14) |
+| `--protect PATTERN` | image name glob to keep regardless of age, repeatable |
+| `--yes` | required for any actual removal |
+## Roadmap
 
-```bash
-./test_prune_guard.sh
-```
+- [ ] Podman support
+- [ ] JSON plan output for review before apply
+- [ ] Warning when an image is referenced only by a stopped container
 
-13 checks against a fake `docker` binary: an attached volume must never appear as
-a candidate, `prune --yes` must refuse when a candidate is attached, a dead
-daemon must exit 2 rather than 1, and a clean listing must prune only the loose
-volume. No daemon is contacted; the test runs on a laptop or in CI.
+## Contributing
+
+Issues and pull requests are welcome. Please keep changes small and focused,
+and add a test for any behaviour change — every repository here ships with a
+runnable test suite and no third-party dependencies, so CI is just
+`python3 -m unittest` / `bash test_*.sh`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE)
